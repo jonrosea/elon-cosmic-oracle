@@ -445,22 +445,22 @@ function boot() {
     var buf = "";
     parts.forEach(function (part) {
       var next = buf ? buf + " " + part : part;
-      if (next.length <= 180) {
+      if (next.length <= 140) {
         buf = next;
         return;
       }
       if (buf) out.push(buf);
-      if (part.length <= 180) {
+      if (part.length <= 140) {
         buf = part;
       } else {
         var words = part.split(/\s+/);
         buf = "";
         words.forEach(function (word) {
           var trial = buf ? buf + " " + word : word;
-          if (trial.length <= 180) buf = trial;
+          if (trial.length <= 140) buf = trial;
           else {
             if (buf) out.push(buf);
-            buf = word.slice(0, 180);
+            buf = word.slice(0, 140);
           }
         });
       }
@@ -470,7 +470,8 @@ function boot() {
   }
 
   function streamElementsUrl(text) {
-    return "https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=" + encodeURIComponent(text);
+    // Google Translate TTS works as a no-key mobile-friendly audio stream.
+    return "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=en&q=" + encodeURIComponent(text);
   }
 
   function startSpeech(plain, fromUserGesture) {
