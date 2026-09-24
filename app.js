@@ -371,14 +371,14 @@ function chooseVoice() {
 }
 
 function voicePitch(voice) {
-  // Keep Elon booth deep / guy even if the engine only offers a neutral voice.
-  if (!voice) return 0.72;
+  // Natural guy booth voice — not robotic / Hawking.
+  if (!voice) return 0.92;
   var blob = ((voice.name || "") + " " + (voice.voiceURI || "")).toLowerCase();
   var femaleish = blob.indexOf("female") !== -1;
   FEMALE_HINTS.forEach(function (hint) {
     if (blob.indexOf(hint) !== -1) femaleish = true;
   });
-  return femaleish ? 0.55 : 0.72;
+  return femaleish ? 0.7 : 0.92;
 }
 
 function speechChunks(plain) {
@@ -660,7 +660,7 @@ function boot() {
         if (piece.length > 140) piece = piece.slice(0, 137) + "...";
 
         var utter = new SpeechSynthesisUtterance(piece);
-        utter.rate = 0.96;
+        utter.rate = 1.0;
         utter.pitch = pitch;
         utter.volume = 1;
         if (voice) utter.voice = voice;
@@ -779,33 +779,25 @@ function boot() {
       setSpeechStatus(message);
     };
 
-    // Android: native speechSynthesis is the reliable path. SAM WAV is backup.
-    var trySam = function () {
-      if (!hasSam) {
-        doneFail("Could not play voice. Open in Chrome, unmute media, then tap again.");
-        return;
-      }
-      setSpeechStatus("Elon is reading the slip...");
-      speakWithSam(plain, token).then(function (ok) {
-        if (ok) doneOk();
-        else doneFail("Voice stopped early. Tap Hear Elon read it again.");
-      }).catch(function () {
-        doneFail("Phone blocked audio. Unmute media volume, then tap again.");
-      });
-    };
-
+    // Prefer natural phone voices. Skip robotic SAM whenever native TTS exists
+    // (SAM sounds like a Stephen Hawking toy — fine only as last resort).
     if (hasNative) {
-      // Warm voices list on Android/Chrome.
       try { window.speechSynthesis.getVoices(); } catch (e) {}
       speakWithNative(plain, token).then(function () {
         doneOk();
       }).catch(function () {
-        trySam();
+        doneFail("Voice cut out. Tap Hear Elon read it again.");
       });
       return;
     }
 
-    trySam();
+    setSpeechStatus("Elon is reading the slip...");
+    speakWithSam(plain, token).then(function (ok) {
+      if (ok) doneOk();
+      else doneFail("Voice stopped early. Tap Hear Elon read it again.");
+    }).catch(function () {
+      doneFail("Phone blocked audio. Unmute media volume, then tap again.");
+    });
   }
 
   function autoSpeak(id) {
