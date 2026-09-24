@@ -141,6 +141,30 @@ function initialsOf(name) {
     .join("");
 }
 
+function parseBirthday(raw) {
+  var text = String(raw || "").trim();
+  if (!text) return "";
+  var y, m, d, match;
+  match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+  if (match) {
+    y = Number(match[1]);
+    m = Number(match[2]);
+    d = Number(match[3]);
+  } else {
+    match = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(text);
+    if (!match) return "";
+    m = Number(match[1]);
+    d = Number(match[2]);
+    y = Number(match[3]);
+  }
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  var dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return "";
+  }
+  return y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+
 function signFromIso(iso) {
   var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   if (!match) return "";
@@ -381,7 +405,6 @@ function boot() {
   var revealTimer = 0;
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  birthdayInput.max = todayIso();
   submitBtn.disabled = true;
   formError.textContent = "Loading the star ledger…";
 
@@ -531,12 +554,12 @@ function boot() {
   });
 
   birthdayInput.addEventListener("input", function () {
-    var sign = signFromIso(birthdayInput.value);
+    var sign = signFromIso(parseBirthday(birthdayInput.value));
     if (sign) signInput.value = sign;
   });
 
   birthdayInput.addEventListener("change", function () {
-    var sign = signFromIso(birthdayInput.value);
+    var sign = signFromIso(parseBirthday(birthdayInput.value));
     if (sign) signInput.value = sign;
   });
 
@@ -548,11 +571,12 @@ function boot() {
       return;
     }
     var name = nameInput.value.trim().replace(/\s+/g, " ");
-    var birthday = birthdayInput.value;
+    var birthday = parseBirthday(birthdayInput.value);
     var sign = signInput.value;
     var errors = [];
     if (!name) errors.push("Enter your name.");
-    if (!birthday) errors.push("Enter your birthday.");
+    if (!String(birthdayInput.value || "").trim()) errors.push("Enter your birthday.");
+    else if (!birthday) errors.push("Type a real date like 06/28/1985 or 1985-06-28.");
     else if (!signFromIso(birthday)) errors.push("That birthday could not be read.");
     else if (birthday > todayIso()) errors.push("Birthday has to be today or earlier.");
     if (SIGNS.indexOf(sign) === -1) errors.push("Choose a star sign.");

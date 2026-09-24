@@ -172,7 +172,8 @@
 
           <div class="field">
             <label for="seeker-birthday">Birthday</label>
-            <input id="seeker-birthday" name="birthday" type="date" required autocomplete="bday">
+            <input id="seeker-birthday" name="birthday" type="text" inputmode="numeric" autocomplete="bday" required placeholder="MM/DD/YYYY" maxlength="10" spellcheck="false">
+            <p class="hint">Type it like 06/28/1985 (or 1985-06-28). No calendar popup.</p>
           </div>
 
           <div class="field">
