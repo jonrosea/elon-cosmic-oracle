@@ -480,3 +480,32 @@ button:disabled {
   .slip { transform: none; opacity: 1; }
   .slip-body { box-shadow: none; }
 }
+
+
+.field-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.bday-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bday-row input {
+  flex: 0 0 auto;
+  width: 3.2rem;
+  text-align: center;
+}
+
+.bday-row input#bday-year {
+  width: 4.6rem;
+  flex: 1 1 auto;
+}
+
+.bday-sep {
+  opacity: 0.7;
+  font-weight: 700;
+}

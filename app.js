@@ -381,7 +381,9 @@ function speechChunks(plain) {
 function boot() {
   var form = document.getElementById("oracle-form");
   var nameInput = document.getElementById("seeker-name");
-  var birthdayInput = document.getElementById("seeker-birthday");
+  var birthdayMonth = document.getElementById("bday-month");
+  var birthdayDay = document.getElementById("bday-day");
+  var birthdayYear = document.getElementById("bday-year");
   var signInput = document.getElementById("seeker-sign");
   var formError = document.getElementById("form-error");
   var submitBtn = document.getElementById("submit-btn");
@@ -442,10 +444,10 @@ function boot() {
       done();
     };
     window.speechSynthesis.addEventListener("voiceschanged", finish);
-    window.setTimeout(finish, 400);
+    window.setTimeout(finish, 800);
   }
 
-  function startSpeech(plain) {
+  function startSpeech(plain, fromUserGesture) {
     pendingAutoId = -1;
     if (!plain) return;
     if (!("speechSynthesis" in window)) {
@@ -453,45 +455,94 @@ function boot() {
       hearBtn.disabled = true;
       return;
     }
+
     var token = ++speakToken;
-    window.speechSynthesis.cancel();
-    window.setTimeout(function () {
-      withVoices(function () {
+    try { window.speechSynthesis.cancel(); } catch (err) {}
+    try { window.speechSynthesis.resume(); } catch (err2) {}
+
+    var voice = chooseVoice();
+    var pitch = voicePitch(voice);
+    var chunks = speechChunks(plain);
+    if (!chunks.length) return;
+
+    var keepAlive = 0;
+    var clearKeepAlive = function () {
+      if (keepAlive) {
+        window.clearInterval(keepAlive);
+        keepAlive = 0;
+      }
+    };
+
+    var speakIndex = function (index) {
+      if (token !== speakToken) {
+        clearKeepAlive();
+        return;
+      }
+      if (index >= chunks.length) {
+        clearKeepAlive();
+        setSpeechStatus("Elon finished reading the slip.");
+        return;
+      }
+      var utterance = new SpeechSynthesisUtterance(chunks[index]);
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice && voice.lang ? voice.lang : "en-US";
+      utterance.pitch = pitch;
+      utterance.rate = 0.95;
+      utterance.volume = 1;
+      utterance.onend = function () {
+        speakIndex(index + 1);
+      };
+      utterance.onerror = function (event) {
         if (token !== speakToken) return;
-        var voice = chooseVoice();
-        var pitch = voicePitch(voice);
-        var chunks = speechChunks(plain);
-        setSpeechStatus(voice
-          ? "Elon is reading the slip… (" + voice.name + ")"
-          : "Elon is reading the slip…");
-        chunks.forEach(function (text, index) {
-          var utterance = new SpeechSynthesisUtterance(text);
-          if (voice) utterance.voice = voice;
-          utterance.lang = voice && voice.lang ? voice.lang : "en-US";
-          utterance.pitch = pitch;
-          utterance.rate = 0.96;
-          utterance.volume = 1;
-          utterance.onend = function () {
-            if (token !== speakToken) return;
-            if (index === chunks.length - 1) setSpeechStatus("Elon finished reading the slip.");
-          };
-          utterance.onerror = function (event) {
-            if (token !== speakToken) return;
-            var reason = event && event.error ? event.error : "";
-            if (reason === "interrupted" || reason === "canceled" || reason === "cancelled") return;
-            setSpeechStatus("Speech stopped. Press “Hear Elon read it” to try again.");
-          };
-          window.speechSynthesis.speak(utterance);
-        });
+        var reason = event && event.error ? event.error : "";
+        if (reason === "interrupted" || reason === "canceled" || reason === "cancelled") return;
+        clearKeepAlive();
+        setSpeechStatus("Speech stopped. Tap “Hear Elon read it” again (turn silent mode off on iPhone).");
+      };
+      try {
+        window.speechSynthesis.speak(utterance);
         window.speechSynthesis.resume();
-      });
-    }, 60);
+      } catch (err3) {
+        clearKeepAlive();
+        setSpeechStatus("Could not start speech. Tap “Hear Elon read it” again.");
+      }
+    };
+
+    setSpeechStatus(voice
+      ? "Elon is reading the slip… (" + voice.name + ")"
+      : "Elon is reading the slip…");
+
+    // iOS/Safari often ignore speech unless the first speak() happens
+    // directly inside the tap handler — no setTimeout before it.
+    if (fromUserGesture) {
+      speakIndex(0);
+    } else {
+      // Auto-speak is unreliable on phones; skip and ask for a tap.
+      setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
+      return;
+    }
+
+    // Chrome desktop bug: synthesis pauses if the tab goes quiet.
+    keepAlive = window.setInterval(function () {
+      if (token !== speakToken) {
+        clearKeepAlive();
+        return;
+      }
+      try {
+        if (window.speechSynthesis.speaking && window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        } else if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.resume();
+        }
+      } catch (err4) {}
+    }, 1200);
   }
 
   function autoSpeak(id) {
     if (id !== pendingAutoId || id !== readingId) return;
     pendingAutoId = -1;
-    startSpeech(currentPlain);
+    // Do not auto-speak on mobile/desktop — browsers block it without a fresh tap.
+    setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
   }
 
   function reveal(reading, id) {
@@ -508,15 +559,8 @@ function boot() {
     if (!reduceMotion) {
       slip.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-    if (reduceMotion) autoSpeak(id);
-    else window.setTimeout(function () { autoSpeak(id); }, 1050);
+    setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
   }
-
-  slipWrap.addEventListener("transitionend", function (event) {
-    if (event.propertyName !== "grid-template-rows") return;
-    if (event.target !== slipWrap) return;
-    autoSpeak(pendingAutoId);
-  });
 
   function fallbackCopy(text) {
     var area = document.createElement("textarea");
@@ -549,19 +593,45 @@ function boot() {
   });
 
   hearBtn.addEventListener("click", function () {
+    if (!currentPlain) {
+      setSpeechStatus("Consult the orb first, then tap again.");
+      return;
+    }
+    // Warmup + first utterance must stay in this click for iOS — no delayed callbacks.
     primeSpeech();
-    startSpeech(currentPlain);
+    startSpeech(currentPlain, true);
   });
 
-  birthdayInput.addEventListener("input", function () {
-    var sign = signFromIso(parseBirthday(birthdayInput.value));
-    if (sign) signInput.value = sign;
-  });
+  function digitsOnly(value, maxLen) {
+    return String(value || "").replace(/\D+/g, "").slice(0, maxLen);
+  }
 
-  birthdayInput.addEventListener("change", function () {
-    var sign = signFromIso(parseBirthday(birthdayInput.value));
+  function composedBirthday() {
+    var mm = digitsOnly(birthdayMonth.value, 2);
+    var dd = digitsOnly(birthdayDay.value, 2);
+    var yyyy = digitsOnly(birthdayYear.value, 4);
+    if (mm.length < 1 || dd.length < 1 || yyyy.length < 4) return "";
+    return parseBirthday(mm + "/" + dd + "/" + yyyy);
+  }
+
+  function syncSignFromBirthday() {
+    var sign = signFromIso(composedBirthday());
     if (sign) signInput.value = sign;
-  });
+  }
+
+  function wireBdayField(input, maxLen, next) {
+    input.addEventListener("input", function () {
+      var cleaned = digitsOnly(input.value, maxLen);
+      if (cleaned !== input.value) input.value = cleaned;
+      syncSignFromBirthday();
+      if (cleaned.length >= maxLen && next) next.focus();
+    });
+    input.addEventListener("change", syncSignFromBirthday);
+  }
+
+  wireBdayField(birthdayMonth, 2, birthdayDay);
+  wireBdayField(birthdayDay, 2, birthdayYear);
+  wireBdayField(birthdayYear, 4, null);
 
   form.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -571,14 +641,19 @@ function boot() {
       return;
     }
     var name = nameInput.value.trim().replace(/\s+/g, " ");
-    var birthday = parseBirthday(birthdayInput.value);
+    var birthday = composedBirthday();
     var sign = signInput.value;
     var errors = [];
     if (!name) errors.push("Enter your name.");
-    if (!String(birthdayInput.value || "").trim()) errors.push("Enter your birthday.");
-    else if (!birthday) errors.push("Type a real date like 06/28/1985 or 1985-06-28.");
-    else if (!signFromIso(birthday)) errors.push("That birthday could not be read.");
-    else if (birthday > todayIso()) errors.push("Birthday has to be today or earlier.");
+    if (!digitsOnly(birthdayMonth.value, 2) || !digitsOnly(birthdayDay.value, 2) || digitsOnly(birthdayYear.value, 4).length < 4) {
+      errors.push("Enter birthday as MM / DD / YYYY.");
+    } else if (!birthday) {
+      errors.push("That birthday is not a real date.");
+    } else if (!signFromIso(birthday)) {
+      errors.push("That birthday could not be read.");
+    } else if (birthday > todayIso()) {
+      errors.push("Birthday has to be today or earlier.");
+    }
     if (SIGNS.indexOf(sign) === -1) errors.push("Choose a star sign.");
     if (errors.length) {
       formError.textContent = errors.join(" ");

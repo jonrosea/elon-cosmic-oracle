@@ -171,9 +171,15 @@
           </div>
 
           <div class="field">
-            <label for="seeker-birthday">Birthday</label>
-            <input id="seeker-birthday" name="birthday" type="text" inputmode="text" enterkeyhint="done" autocomplete="bday" required placeholder="MM/DD/YYYY" maxlength="10" spellcheck="false">
-            <p class="hint">Type it like 06/28/1985 (or 1985-06-28). No calendar popup.</p>
+            <span class="field-label" id="birthday-label">Birthday</span>
+            <div class="bday-row" role="group" aria-labelledby="birthday-label">
+              <input id="bday-month" name="bday-month" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="bday-month" required placeholder="MM" maxlength="2" spellcheck="false" aria-label="Birth month">
+              <span class="bday-sep" aria-hidden="true">/</span>
+              <input id="bday-day" name="bday-day" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="bday-day" required placeholder="DD" maxlength="2" spellcheck="false" aria-label="Birth day">
+              <span class="bday-sep" aria-hidden="true">/</span>
+              <input id="bday-year" name="bday-year" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" autocomplete="bday-year" required placeholder="YYYY" maxlength="4" spellcheck="false" aria-label="Birth year">
+            </div>
+            <p class="hint">Just digits — month, day, year. Example: 06 / 28 / 1985.</p>
           </div>
 
           <div class="field">
