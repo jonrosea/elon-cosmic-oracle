@@ -51,42 +51,48 @@ var MALE_RANK = [
   "google uk english male",
   "google us english male",
   "microsoft david",
-  "microsoft george",
   "microsoft mark",
   "microsoft guy",
-  "english united states",
-  "english (united states)",
+  "microsoft george",
+  "microsoft steffan",
+  "microsoft ryan",
+  "microsoft andrew",
+  "microsoft eric",
+  "microsoft james",
+  "microsoft tony",
+  "microsoft christopher",
   "en-us-x-tpd",
-  "en-us-x-tpd-local",
-  "en-us-x-tpd-network",
   "en-us-x-iol",
+  "en-us-x-trg",
+  "en-us-x-gob",
   "en-gb-x-gbd",
-  "en-gb-x-gbd-local",
-  "en-gb-x-gbd-network",
-  "en-us-x-sfg",
-  "male",
+  "en-gb-x-gbg",
+  "en-gb-x-rkm",
+  "english (america)",
+  "english united kingdom",
   "daniel",
   "david",
-  "alex",
-  "aaron",
-  "arthur",
+  "fred",
   "ralph",
   "bruce",
-  "fred",
-  "tom",
-  "oliver",
-  "nathan",
-  "brian",
-  "christopher",
+  "arthur",
+  "aaron",
   "rishi",
   "gordon",
+  "thomas",
+  "nathan",
+  "oliver",
   "james",
+  "brian",
   "ryan",
-  "guy"
+  "guy",
+  "male"
 ];
 
 var FEMALE_HINTS = [
   "female",
+  "woman",
+  "girl",
   "samantha",
   "victoria",
   "karen",
@@ -101,8 +107,23 @@ var FEMALE_HINTS = [
   "ava",
   "kate",
   "nicky",
+  "aria",
+  "jenny",
+  "sara",
+  "sonia",
+  "hazel",
+  "heather",
+  "linda",
+  "michelle",
   "google us english",
-  "google uk english female"
+  "google uk english female",
+  "en-us-x-sfg",
+  "en-us-x-tpf",
+  "en-us-x-sfc",
+  "en-us-x-iob",
+  "en-gb-x-gba",
+  "en-gb-x-rbp",
+  "en-gb-x-rbc"
 ];
 
 function fnv1a(str) {
@@ -324,23 +345,46 @@ function slipHtml(model) {
   ].join("");
 }
 
+function isFemaleVoice(voice) {
+  var blob = ((voice && voice.name) || "") + " " + String((voice && voice.voiceURI) || "");
+  blob = blob.toLowerCase();
+  if (blob.indexOf("female") !== -1 || blob.indexOf("woman") !== -1) return true;
+  if (blob.indexOf("male") !== -1 && blob.indexOf("female") === -1) return false;
+  for (var i = 0; i < FEMALE_HINTS.length; i += 1) {
+    if (blob.indexOf(FEMALE_HINTS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function isMaleVoice(voice) {
+  var blob = ((voice && voice.name) || "") + " " + String((voice && voice.voiceURI) || "");
+  blob = blob.toLowerCase();
+  if (isFemaleVoice(voice)) return false;
+  if (blob.indexOf("male") !== -1) return true;
+  for (var i = 0; i < MALE_RANK.length; i += 1) {
+    if (blob.indexOf(MALE_RANK[i]) !== -1) return true;
+  }
+  return false;
+}
+
 function scoreVoice(voice) {
   var name = (voice.name || "").toLowerCase();
   var lang = (voice.lang || "").toLowerCase();
   var uri = String(voice.voiceURI || "").toLowerCase();
   var blob = name + " " + uri;
   var score = 0;
-  if (lang.indexOf("en") === 0) score += 8;
-  else score -= 12;
-  if (voice.localService) score += 4;
-  if (blob.indexOf("male") !== -1) score += 28;
-  if (blob.indexOf("female") !== -1) score -= 40;
-  FEMALE_HINTS.forEach(function (hint) {
-    if (blob.indexOf(hint) !== -1) score -= 18;
-  });
+  if (lang.indexOf("en") === 0) score += 10;
+  else if (lang.indexOf("en") !== -1) score += 4;
+  else score -= 20;
+  if (voice.localService) score += 3;
+  // Prefer natural names; demote obvious robots / compact engines.
+  if (blob.indexOf("espeak") !== -1 || blob.indexOf("compact") !== -1) score -= 25;
+  if (blob.indexOf("novelty") !== -1 || blob.indexOf("whisper") !== -1) score -= 20;
+  if (isFemaleVoice(voice)) score -= 50;
+  if (blob.indexOf("male") !== -1 && blob.indexOf("female") === -1) score += 35;
   for (var i = 0; i < MALE_RANK.length; i += 1) {
     if (blob.indexOf(MALE_RANK[i]) !== -1) {
-      score += 40 - Math.min(i, 30);
+      score += 45 - Math.min(i, 35);
       break;
     }
   }
@@ -353,32 +397,63 @@ function chooseVoice() {
   if (!voices.length) return null;
   var best = null;
   var bestScore = -999;
+  var bestMale = null;
+  var bestMaleScore = -999;
   voices.forEach(function (voice) {
     var score = scoreVoice(voice);
     if (score > bestScore) {
       best = voice;
       bestScore = score;
     }
+    if (isMaleVoice(voice) && score > bestMaleScore) {
+      bestMale = voice;
+      bestMaleScore = score;
+    }
   });
-  if (best && bestScore < 0) {
-    var english = null;
-    voices.forEach(function (voice) {
-      if (!english && (voice.lang || "").toLowerCase().indexOf("en") === 0) english = voice;
-    });
-    return english || best;
-  }
+  if (bestMale) return bestMale;
   return best;
 }
 
 function voicePitch(voice) {
   // Natural guy booth voice — not robotic / Hawking.
-  if (!voice) return 0.92;
-  var blob = ((voice.name || "") + " " + (voice.voiceURI || "")).toLowerCase();
-  var femaleish = blob.indexOf("female") !== -1;
-  FEMALE_HINTS.forEach(function (hint) {
-    if (blob.indexOf(hint) !== -1) femaleish = true;
+  if (!voice) return 0.85;
+  if (isFemaleVoice(voice)) return 0.65;
+  return 0.9;
+}
+
+function waitForVoices(timeoutMs) {
+  return new Promise(function (resolve) {
+    if (!("speechSynthesis" in window)) {
+      resolve([]);
+      return;
+    }
+    var done = false;
+    var finish = function (list) {
+      if (done) return;
+      done = true;
+      try { window.speechSynthesis.removeEventListener("voiceschanged", onChange); } catch (e) {}
+      resolve(list || []);
+    };
+    var onChange = function () {
+      var list = window.speechSynthesis.getVoices() || [];
+      if (list.length) finish(list);
+    };
+    try {
+      var now = window.speechSynthesis.getVoices() || [];
+      if (now.length) {
+        finish(now);
+        return;
+      }
+      window.speechSynthesis.addEventListener("voiceschanged", onChange);
+    } catch (err) {
+      finish([]);
+      return;
+    }
+    setTimeout(function () {
+      try { finish(window.speechSynthesis.getVoices() || []); }
+      catch (e2) { finish([]); }
+    }, timeoutMs || 1200);
   });
-  return femaleish ? 0.7 : 0.92;
 }
 
 function speechChunks(plain) {
@@ -483,32 +558,41 @@ function boot() {
       .trim();
   }
 
-  function spokenPlain(plain) {
-    // Read fortune body only — never the name/date header (Android was stopping there).
+  function isSectionHeader(line) {
+    // Exact headers only — "Hearts mend..." must NOT match "Heart".
+    return /^(Career|Heart|Cosmos):?$/i.test(String(line || "").trim());
+  }
+
+  function spokenSections(plain) {
+    // One spoken beat per section so Heart cannot vanish mid-queue.
     var raw = String(plain || "").split("\n");
-    var keep = [];
+    var sections = [];
     var i = 0;
     while (i < raw.length) {
       var line = raw[i].trim();
-      if (/^Career:?$/i.test(line) || /^Heart:?$/i.test(line) || /^Cosmos:?$/i.test(line)) {
+      if (isSectionHeader(line)) {
         var title = line.replace(/:$/, "");
         var body = [];
         i += 1;
         while (i < raw.length) {
           var next = raw[i].trim();
           if (!next) break;
-          if (/^(Career|Heart|Cosmos|Star chart|Seal|For )/i.test(next)) break;
+          if (isSectionHeader(next)) break;
+          if (/^Star chart/i.test(next)) break;
+          if (/^Seal\b/i.test(next)) break;
+          if (/^For\s/i.test(next)) break;
           if (/oracle/i.test(next) && next.length < 40) break;
           body.push(next);
           i += 1;
         }
-        if (body.length) keep.push(title + ". " + body.join(" "));
+        if (body.length) {
+          sections.push(sanitizeForSam(title + ". " + body.join(" ")));
+        }
         continue;
       }
       i += 1;
     }
-    // Short closing quip after Cosmos body, before star chart.
-    var joined = keep.join(" ");
+    // Short closing quip after Cosmos, before star chart.
     var sawCosmos = false;
     var sawCosmosBody = false;
     for (var j = 0; j < raw.length; j += 1) {
@@ -520,34 +604,34 @@ function boot() {
       }
       if (!sawCosmos) continue;
       if (/^Star chart/i.test(bit)) break;
-      if (!bit) {
-        if (sawCosmosBody) {
-          // blank line after cosmos body — next short line is the quip
-        }
-        continue;
-      }
-      if (/^(Career|Heart|Cosmos|Seal|For )/i.test(bit)) continue;
+      if (!bit) continue;
+      if (isSectionHeader(bit) || /^Seal\b/i.test(bit) || /^For\s/i.test(bit)) continue;
       if (!sawCosmosBody) {
         sawCosmosBody = true;
         continue;
       }
-      if (bit.length < 140 && joined.indexOf(bit) === -1) {
-        keep.push(bit);
+      if (bit.length < 140) {
+        var quip = sanitizeForSam(bit);
+        if (quip) sections.push(quip);
         break;
       }
     }
-    if (!keep.length) {
-      // Absolute fallback: skip header-ish lines.
+    if (!sections.length) {
       raw.forEach(function (row) {
         var t = row.trim();
         if (!t) return;
-        if (/oracle|born |^Seal |^For |Star chart/i.test(t)) return;
-        if (/^(Career|Heart|Cosmos):?$/i.test(t)) return;
-        keep.push(t);
+        if (/oracle|born |^Seal\b|^For\s|Star chart/i.test(t)) return;
+        if (isSectionHeader(t)) return;
+        var cleaned = sanitizeForSam(t);
+        if (cleaned) sections.push(cleaned);
       });
-      keep = keep.slice(0, 4);
+      sections = sections.slice(0, 4);
     }
-    return sanitizeForSam(keep.join(" "));
+    return sections.filter(Boolean);
+  }
+
+  function spokenPlain(plain) {
+    return spokenSections(plain).join(" ");
   }
 
   function samChunks(plain) {
@@ -674,88 +758,81 @@ function boot() {
         return;
       }
 
-      var chunks = speechChunks(spokenPlain(plain)).filter(function (part) {
-        return part && part.length;
-      });
-      // Extra safety: hard-split long chunks for Android.
-      var shortChunks = [];
-      chunks.forEach(function (part) {
-        if (part.length <= 110) {
-          shortChunks.push(part);
-          return;
-        }
-        var words = part.split(/\s+/);
-        var buf = "";
-        words.forEach(function (word) {
-          var trial = buf ? buf + " " + word : word;
-          if (trial.length <= 110) buf = trial;
-          else {
-            if (buf) shortChunks.push(buf);
-            buf = word;
-          }
-        });
-        if (buf) shortChunks.push(buf);
-      });
-      chunks = shortChunks;
-      if (!chunks.length) {
+      var sections = spokenSections(plain);
+      if (!sections.length) {
         reject(new Error("empty"));
         return;
       }
 
-      try { window.speechSynthesis.cancel(); } catch (err) {}
-      try { window.speechSynthesis.getVoices(); } catch (err2) {}
+      waitForVoices(1500).then(function () {
+        if (token !== speakToken) {
+          reject(new Error("cancelled"));
+          return;
+        }
 
-      var voice = chooseVoice();
-      var pitch = voicePitch(voice);
-      var pending = chunks.length;
-      var started = false;
-      var failed = false;
+        try { window.speechSynthesis.cancel(); } catch (err) {}
 
-      var finishOk = function () {
-        if (failed) return;
-        resolve(true);
-      };
-      var finishErr = function (err) {
-        if (failed) return;
-        failed = true;
-        try { window.speechSynthesis.cancel(); } catch (e0) {}
-        reject(err || new Error("native speak failed"));
-      };
+        var voice = chooseVoice();
+        var pitch = voicePitch(voice);
+        var voiceLabel = voice && voice.name ? voice.name : "default";
+        setSpeechStatus("Cosmo is reading (" + voiceLabel + ")...");
 
-      // Queue every chunk up front — Android Chrome is much happier than onend chaining.
-      chunks.forEach(function (piece, index) {
-        var utter = new SpeechSynthesisUtterance(piece);
-        utter.rate = 1.0;
-        utter.pitch = pitch;
-        utter.volume = 1;
-        if (voice) utter.voice = voice;
-        utter.lang = (voice && voice.lang) || "en-US";
-        utter.onstart = function () { started = true; };
-        utter.onend = function () {
-          pending -= 1;
+        var failed = false;
+        var started = false;
+        var index = 0;
+
+        var finishOk = function () {
+          if (failed) return;
+          resolve({ ok: true, voiceName: voiceLabel });
+        };
+        var finishErr = function (err) {
+          if (failed) return;
+          failed = true;
+          try { window.speechSynthesis.cancel(); } catch (e0) {}
+          reject(err || new Error("native speak failed"));
+        };
+
+        var speakNext = function () {
           if (token !== speakToken) {
             finishErr(new Error("cancelled"));
             return;
           }
-          if (pending <= 0) finishOk();
-        };
-        utter.onerror = function (event) {
-          var code = event && event.error;
-          if (code === "interrupted" || code === "canceled") {
-            finishErr(new Error(code));
+          if (index >= sections.length) {
+            finishOk();
             return;
           }
-          pending -= 1;
-          if (pending <= 0) {
-            if (started) finishOk();
-            else finishErr(new Error(code || "utterance error"));
+          var piece = sections[index];
+          index += 1;
+          var utter = new SpeechSynthesisUtterance(piece);
+          utter.rate = 1.0;
+          utter.pitch = pitch;
+          utter.volume = 1;
+          if (voice) utter.voice = voice;
+          utter.lang = (voice && voice.lang) || "en-US";
+          utter.onstart = function () { started = true; };
+          utter.onend = function () {
+            // Small gap helps Android/Firefox flush the queue between sections.
+            setTimeout(speakNext, 60);
+          };
+          utter.onerror = function (event) {
+            var code = event && event.error;
+            if (code === "interrupted" || code === "canceled") {
+              finishErr(new Error(code));
+              return;
+            }
+            // Skip a bad chunk and keep going so Heart/Cosmos still play.
+            setTimeout(speakNext, 60);
+          };
+          try {
+            window.speechSynthesis.speak(utter);
+          } catch (err3) {
+            finishErr(err3);
           }
         };
-        try {
-          window.speechSynthesis.speak(utter);
-        } catch (err3) {
-          finishErr(err3);
-        }
+
+        speakNext();
+      }).catch(function (err) {
+        reject(err || new Error("voices failed"));
       });
     });
   }
@@ -843,8 +920,11 @@ function boot() {
     // (SAM sounds like a Stephen Hawking toy — fine only as last resort).
     if (hasNative) {
       try { window.speechSynthesis.getVoices(); } catch (e) {}
-      speakWithNative(plain, token).then(function () {
-        doneOk();
+      speakWithNative(plain, token).then(function (result) {
+        if (token !== speakToken) return;
+        hearBtn.disabled = false;
+        var label = result && result.voiceName ? result.voiceName : "";
+        setSpeechStatus(label ? ("Cosmo finished (" + label + ").") : "Cosmo finished reading the slip.");
       }).catch(function () {
         doneFail("Voice cut out. Tap Hear Cosmo read it again.");
       });
