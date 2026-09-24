@@ -406,6 +406,14 @@ function boot() {
   var pendingAutoId = -1;
   var revealTimer = 0;
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if ("speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.addEventListener("voiceschanged", function () {
+        try { window.speechSynthesis.getVoices(); } catch (e) {}
+      });
+    } catch (e2) {}
+  }
 
   submitBtn.disabled = true;
   formError.textContent = "Loading the star ledger…";
@@ -566,21 +574,139 @@ function boot() {
       var finish = function (ok, err) {
         if (cleaned) return;
         cleaned = true;
-        try { URL.revokeObjectURL(url); } catch (e) {}
         ttsAudio.onended = null;
         ttsAudio.onerror = null;
+        ttsAudio.oncanplay = null;
+        try { URL.revokeObjectURL(url); } catch (e) {}
         if (ok) resolve(true);
         else reject(err || new Error("audio play failed"));
       };
+      ttsAudio.muted = false;
+      ttsAudio.volume = 1;
       ttsAudio.onended = function () { finish(true); };
       ttsAudio.onerror = function () { finish(false, new Error("audio element error")); };
+      ttsAudio.oncanplay = function () {
+        if (token !== speakToken) {
+          finish(false, new Error("cancelled"));
+          return;
+        }
+        var playPromise = ttsAudio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          playPromise.catch(function (err) { finish(false, err); });
+        }
+      };
       ttsAudio.src = url;
-      var playPromise = ttsAudio.play();
-      if (playPromise && typeof playPromise.then === "function") {
-        playPromise.then(function () {}).catch(function (err) {
-          finish(false, err);
-        });
+      try { ttsAudio.load(); } catch (e2) {}
+    });
+  }
+
+  function speakWithNative(plain, token) {
+    return new Promise(function (resolve, reject) {
+      if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+        reject(new Error("no speechSynthesis"));
+        return;
       }
+      var text = spokenPlain(plain);
+      if (!text) {
+        reject(new Error("empty"));
+        return;
+      }
+      try { window.speechSynthesis.cancel(); } catch (err) {}
+
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.02;
+      utter.pitch = voicePitch(chooseVoice());
+      utter.volume = 1;
+      var voice = chooseVoice();
+      if (voice) utter.voice = voice;
+      if (voice && voice.lang) utter.lang = voice.lang;
+      else utter.lang = "en-US";
+
+      var settled = false;
+      var watchdog = 0;
+      var finish = function (ok, err) {
+        if (settled) return;
+        settled = true;
+        if (watchdog) window.clearInterval(watchdog);
+        if (ok) resolve(true);
+        else reject(err || new Error("native speak failed"));
+      };
+
+      utter.onend = function () { finish(true); };
+      utter.onerror = function (event) {
+        finish(false, new Error((event && event.error) || "utterance error"));
+      };
+
+      // Android Chrome sometimes stalls mid-utterance; nudge it.
+      watchdog = window.setInterval(function () {
+        if (token !== speakToken) {
+          try { window.speechSynthesis.cancel(); } catch (e) {}
+          finish(false, new Error("cancelled"));
+          return;
+        }
+        try {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          }
+        } catch (e2) {}
+      }, 8000);
+
+      try {
+        window.speechSynthesis.speak(utter);
+        // Some Android builds need a tick before speaking registers.
+        window.setTimeout(function () {
+          if (token !== speakToken) return;
+          if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+            finish(false, new Error("native did not start"));
+          }
+        }, 350);
+      } catch (err3) {
+        finish(false, err3);
+      }
+    });
+  }
+
+  function speakWithSam(plain, token) {
+    return new Promise(function (resolve, reject) {
+      var sam = getSam();
+      if (!sam) {
+        reject(new Error("no sam"));
+        return;
+      }
+      var chunks = samChunks(plain);
+      if (!chunks.length) {
+        reject(new Error("no chunks"));
+        return;
+      }
+
+      var playIndex = function (index) {
+        if (token !== speakToken) {
+          resolve(false);
+          return;
+        }
+        if (index >= chunks.length) {
+          resolve(true);
+          return;
+        }
+        var piece = chunks[index];
+        var buf8;
+        try {
+          buf8 = sam.buf8(piece);
+        } catch (err2) {
+          reject(err2);
+          return;
+        }
+        if (!buf8 || !buf8.length) {
+          playIndex(index + 1);
+          return;
+        }
+        playWavBlob(wavFromBuf8(buf8), token).then(function () {
+          playIndex(index + 1);
+        }).catch(reject);
+      };
+
+      playIndex(0);
     });
   }
 
@@ -597,58 +723,56 @@ function boot() {
     if ("speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch (err) {}
     }
-
     unlockAudio();
 
-    var sam = getSam();
-    if (!sam) {
-      setSpeechStatus("Voice engine failed to load. Hard-refresh, then tap again.");
-      return;
-    }
-
-    var chunks = samChunks(plain);
-    if (!chunks.length) {
-      setSpeechStatus("Nothing to read on this slip.");
+    var hasNative = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+    var hasSam = typeof SamJs === "function";
+    if (!hasNative && !hasSam) {
+      setSpeechStatus("This browser has no voice engine. Try Chrome.");
       return;
     }
 
     setSpeechStatus("Elon is reading the slip...");
     hearBtn.disabled = true;
 
-    var playIndex = function (index) {
-      if (token !== speakToken) {
-        hearBtn.disabled = false;
+    var doneOk = function () {
+      if (token !== speakToken) return;
+      hearBtn.disabled = false;
+      setSpeechStatus("Elon finished reading the slip.");
+    };
+    var doneFail = function (message) {
+      if (token !== speakToken) return;
+      hearBtn.disabled = false;
+      setSpeechStatus(message);
+    };
+
+    // Android: native speechSynthesis is the reliable path. SAM WAV is backup.
+    var trySam = function () {
+      if (!hasSam) {
+        doneFail("Could not play voice. Open in Chrome, unmute media, then tap again.");
         return;
       }
-      if (index >= chunks.length) {
-        hearBtn.disabled = false;
-        setSpeechStatus("Elon finished reading the slip.");
-        return;
-      }
-      var piece = chunks[index];
-      var buf8;
-      try {
-        buf8 = sam.buf8(piece);
-      } catch (err2) {
-        hearBtn.disabled = false;
-        setSpeechStatus("Voice hit a snag on that line. Tap Hear Elon read it again.");
-        return;
-      }
-      if (!buf8 || !buf8.length) {
-        // Skip unspeakable chunk and continue.
-        playIndex(index + 1);
-        return;
-      }
-      var blob = wavFromBuf8(buf8);
-      playWavBlob(blob, token).then(function () {
-        playIndex(index + 1);
+      setSpeechStatus("Elon is reading the slip...");
+      speakWithSam(plain, token).then(function (ok) {
+        if (ok) doneOk();
+        else doneFail("Voice stopped early. Tap Hear Elon read it again.");
       }).catch(function () {
-        hearBtn.disabled = false;
-        setSpeechStatus("Phone blocked audio. Unmute the ringer, raise volume, then tap again.");
+        doneFail("Phone blocked audio. Unmute media volume, then tap again.");
       });
     };
 
-    playIndex(0);
+    if (hasNative) {
+      // Warm voices list on Android/Chrome.
+      try { window.speechSynthesis.getVoices(); } catch (e) {}
+      speakWithNative(plain, token).then(function () {
+        doneOk();
+      }).catch(function () {
+        trySam();
+      });
+      return;
+    }
+
+    trySam();
   }
 
   function autoSpeak(id) {
@@ -665,7 +789,7 @@ function boot() {
     consultStatus.hidden = true;
     scene.classList.remove("is-consulting");
     actions.hidden = false;
-    hearBtn.disabled = typeof SamJs !== "function";
+    hearBtn.disabled = !(typeof SamJs === "function" || ("speechSynthesis" in window));
     slipWrap.classList.add("is-open");
     pendingAutoId = id;
     if (!reduceMotion) {
