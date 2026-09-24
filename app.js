@@ -33,18 +33,18 @@ var MONTHS = [
 var CATEGORIES = ["career", "love", "wealth", "risk", "space", "humor"];
 
 var STAR_BLURBS = {
-  Aries: "Aries lights the fuse early. For entertainment only, this chart dares a clean ignition: one target, fewer side quests, and enough thrust to leave the launch pad before lunch. The sky is not awarding trophies. It is timing a countdown you already feel in your chest.",
-  Taurus: "Taurus gathers mass the way planets do — slowly, then undeniably. The playful chart puts value where you refuse to be rushed: a craft, a savings habit, a person you keep showing up for. Steady thrust still reaches orbit when you stop restarting the engine for applause.",
-  Gemini: "Gemini lives on signal bounce. Strictly for fun, the chart has you tuning an idea and a conversation until they lock phase like twin radios. Write the useful part down before the next shiny object changes the channel and erases the frequency.",
-  Cancer: "Cancer builds the habitat while others argue about the destination. The novelty chart points at basecamp: a safer rhythm, a kinder boundary, a home that can support a longer mission. Soft structure is still structure — and hermetically sealed kindness travels far.",
-  Leo: "Leo wants the spotlight and the payload that deserves it. The entertainment stars say put the real thing where people can see it — a demo, a page, a promise you can keep under bright lights. Applause is optional weather. Evidence is the guidance system.",
-  Virgo: "Virgo debugs the universe one bolt at a time. The playful reading puts your edge in the checklist everyone else skips between coffee and chaos. Fix one system until it runs clean, then resist rebuilding it out of affection for tweaks and tiny screws.",
-  Libra: "Libra balances the load so the craft does not tumble. For amusement only, the chart shows a pact that needs clearer terms and a fairer split of the mass. Harmony arrives through a decision with a timestamp, not through another graceful delay.",
-  Scorpio: "Scorpio will stare at the dark side of the Moon without flinching. The fun chart hints at a truth you already suspect under the surface noise. Name it, jettison the dead weight, and keep the crew circle small, loyal, and pressure-tested.",
-  Sagittarius: "Sagittarius aims downrange past the comfortable horizon. The entertainment heavens draw a long arc: a trip, a bold application, a question too big for the current room. Pack light. Curiosity is the engine; jokes are the heat shield.",
-  Capricorn: "Capricorn builds the tower and then invites the inspector with a clipboard. The playful stars endorse a serious plan with milestones a stranger could audit. Ambition only lands when the structure can hold the landing gear and the ego.",
-  Aquarius: "Aquarius rewires the grid while committees debate the old wiring diagram. For entertainment only, the chart blinks at an unconventional fix at small scale. Run the test, publish the result, and let the data argue louder than the meeting.",
-  Pisces: "Pisces swims through signal, dream, and static at once. The novelty chart asks for a tank around the fuel: a date, a draft, a collaborator who likes reality enough to bring snacks. Imagination remains propellant — it still needs plumbing."
+  Aries: "Aries carries a bright spark. For entertainment only, this chart favors a clean start: pick one true aim, leave the extra battles on the shelf, and let courage walk at a human pace.",
+  Taurus: "Taurus steadies the ground. For entertainment only, comfort and craft share the week: finish one lasting thing, spend on quality over glitter, and let patience collect quiet interest.",
+  Gemini: "Gemini opens many windows. For entertainment only, choose two conversations that matter, write the note you keep rewriting, and let curiosity travel without scattering your peace.",
+  Cancer: "Cancer guards the hearth. For entertainment only, tend the soft places: feed someone, rest early, and trust that home can be a person as much as a room.",
+  Leo: "Leo warms the room. For entertainment only, share credit as freely as light, polish one proud effort, and remember applause lasts longer when it is kind.",
+  Virgo: "Virgo sorts the seeds. For entertainment only, mend what is almost right, clear one small mess, and let careful hands invite larger luck.",
+  Libra: "Libra balances the scales. For entertainment only, seek the fair middle, speak gently in a tense doorway, and let beauty be useful as well as lovely.",
+  Scorpio: "Scorpio keeps deep water. For entertainment only, tell one true thing, release one old thorn, and let loyalty prove itself without a test.",
+  Sagittarius: "Sagittarius points down the road. For entertainment only, pack light, learn aloud, and let a wide horizon cure a narrow worry.",
+  Capricorn: "Capricorn climbs with purpose. For entertainment only, honor the long plan, keep one promise on time, and let ambition wear sturdy shoes.",
+  Aquarius: "Aquarius opens the future a crack. For entertainment only, help the circle, try the odd idea kindly, and let progress stay human-sized.",
+  Pisces: "Pisces listens to tides. For entertainment only, dream with a glass of water nearby, forgive a small weather of the heart, and let intuition arrive without forcing it."
 };
 
 var MALE_RANK = [
@@ -266,7 +266,7 @@ function buildReading(input, bank) {
     star: STAR_BLURBS[input.sign]
   };
   var lines = [
-    "Elon's Cosmic Oracle",
+    "Cosmo Voss Cosmic Oracle",
     "For " + model.name,
     model.sign + ", born " + model.born,
     "Seal " + model.seal,
@@ -306,7 +306,7 @@ function escapeHtml(value) {
 
 function slipHtml(model) {
   return [
-    '<p class="kicker">Elon\'s Cosmic Oracle</p>',
+    '<p class="kicker">Cosmo Voss Cosmic Oracle</p>',
     "<h2>For " + escapeHtml(model.name) + "</h2>",
     '<p class="meta">' + escapeHtml(model.sign) + ", born " + escapeHtml(model.born) + "</p>",
     '<p class="seal">Seal ' + escapeHtml(model.seal) + "</p>",
@@ -484,23 +484,70 @@ function boot() {
   }
 
   function spokenPlain(plain) {
-    // Career / Heart / Cosmos (+ short quip). Star chart stays off the spoken pass.
-    var lines = String(plain || "").split(/\n+/).map(function (l) {
-      return l.trim();
-    }).filter(Boolean);
+    // Read fortune body only — never the name/date header (Android was stopping there).
+    var raw = String(plain || "").split("\n");
     var keep = [];
-    var quip = "";
-    lines.forEach(function (line) {
-      if (/^Career:/i.test(line) || /^Heart:/i.test(line) || /^Cosmos:/i.test(line)) {
-        keep.push(line);
-      } else if (!quip && !/^Star chart/i.test(line) && !/^For /i.test(line) && !/^Seal /i.test(line) && line.length < 120) {
-        // humor line usually sits after cosmos
-        if (keep.length >= 3) quip = line;
+    var i = 0;
+    while (i < raw.length) {
+      var line = raw[i].trim();
+      if (/^Career:?$/i.test(line) || /^Heart:?$/i.test(line) || /^Cosmos:?$/i.test(line)) {
+        var title = line.replace(/:$/, "");
+        var body = [];
+        i += 1;
+        while (i < raw.length) {
+          var next = raw[i].trim();
+          if (!next) break;
+          if (/^(Career|Heart|Cosmos|Star chart|Seal|For )/i.test(next)) break;
+          if (/oracle/i.test(next) && next.length < 40) break;
+          body.push(next);
+          i += 1;
+        }
+        if (body.length) keep.push(title + ". " + body.join(" "));
+        continue;
       }
-    });
-    if (quip) keep.push(quip);
-    if (!keep.length) keep = lines.slice(0, 4);
-    return sanitizeForSam(keep.join(". "));
+      i += 1;
+    }
+    // Short closing quip after Cosmos body, before star chart.
+    var joined = keep.join(" ");
+    var sawCosmos = false;
+    var sawCosmosBody = false;
+    for (var j = 0; j < raw.length; j += 1) {
+      var bit = raw[j].trim();
+      if (/^Cosmos:?$/i.test(bit)) {
+        sawCosmos = true;
+        sawCosmosBody = false;
+        continue;
+      }
+      if (!sawCosmos) continue;
+      if (/^Star chart/i.test(bit)) break;
+      if (!bit) {
+        if (sawCosmosBody) {
+          // blank line after cosmos body — next short line is the quip
+        }
+        continue;
+      }
+      if (/^(Career|Heart|Cosmos|Seal|For )/i.test(bit)) continue;
+      if (!sawCosmosBody) {
+        sawCosmosBody = true;
+        continue;
+      }
+      if (bit.length < 140 && joined.indexOf(bit) === -1) {
+        keep.push(bit);
+        break;
+      }
+    }
+    if (!keep.length) {
+      // Absolute fallback: skip header-ish lines.
+      raw.forEach(function (row) {
+        var t = row.trim();
+        if (!t) return;
+        if (/oracle|born |^Seal |^For |Star chart/i.test(t)) return;
+        if (/^(Career|Heart|Cosmos):?$/i.test(t)) return;
+        keep.push(t);
+      });
+      keep = keep.slice(0, 4);
+    }
+    return sanitizeForSam(keep.join(" "));
   }
 
   function samChunks(plain) {
@@ -627,10 +674,29 @@ function boot() {
         return;
       }
 
-      // Android Chrome truncates long single utterances. Speak short chunks in order.
       var chunks = speechChunks(spokenPlain(plain)).filter(function (part) {
         return part && part.length;
       });
+      // Extra safety: hard-split long chunks for Android.
+      var shortChunks = [];
+      chunks.forEach(function (part) {
+        if (part.length <= 110) {
+          shortChunks.push(part);
+          return;
+        }
+        var words = part.split(/\s+/);
+        var buf = "";
+        words.forEach(function (word) {
+          var trial = buf ? buf + " " + word : word;
+          if (trial.length <= 110) buf = trial;
+          else {
+            if (buf) shortChunks.push(buf);
+            buf = word;
+          }
+        });
+        if (buf) shortChunks.push(buf);
+      });
+      chunks = shortChunks;
       if (!chunks.length) {
         reject(new Error("empty"));
         return;
@@ -641,62 +707,56 @@ function boot() {
 
       var voice = chooseVoice();
       var pitch = voicePitch(voice);
+      var pending = chunks.length;
       var started = false;
-      var index = 0;
+      var failed = false;
 
-      var speakNext = function () {
-        if (token !== speakToken) {
-          try { window.speechSynthesis.cancel(); } catch (e0) {}
-          reject(new Error("cancelled"));
-          return;
-        }
-        if (index >= chunks.length) {
-          resolve(true);
-          return;
-        }
+      var finishOk = function () {
+        if (failed) return;
+        resolve(true);
+      };
+      var finishErr = function (err) {
+        if (failed) return;
+        failed = true;
+        try { window.speechSynthesis.cancel(); } catch (e0) {}
+        reject(err || new Error("native speak failed"));
+      };
 
-        var piece = chunks[index++];
-        // Keep each Android chunk short.
-        if (piece.length > 140) piece = piece.slice(0, 137) + "...";
-
+      // Queue every chunk up front — Android Chrome is much happier than onend chaining.
+      chunks.forEach(function (piece, index) {
         var utter = new SpeechSynthesisUtterance(piece);
         utter.rate = 1.0;
         utter.pitch = pitch;
         utter.volume = 1;
         if (voice) utter.voice = voice;
         utter.lang = (voice && voice.lang) || "en-US";
-
         utter.onstart = function () { started = true; };
         utter.onend = function () {
-          // Small gap helps Android flush the audio focus between chunks.
-          window.setTimeout(speakNext, 60);
+          pending -= 1;
+          if (token !== speakToken) {
+            finishErr(new Error("cancelled"));
+            return;
+          }
+          if (pending <= 0) finishOk();
         };
         utter.onerror = function (event) {
           var code = event && event.error;
           if (code === "interrupted" || code === "canceled") {
-            reject(new Error(code));
+            finishErr(new Error(code));
             return;
           }
-          // If at least one chunk played, finish gracefully instead of falling over.
-          if (started && index >= chunks.length) {
-            resolve(true);
-            return;
+          pending -= 1;
+          if (pending <= 0) {
+            if (started) finishOk();
+            else finishErr(new Error(code || "utterance error"));
           }
-          if (started) {
-            window.setTimeout(speakNext, 60);
-            return;
-          }
-          reject(new Error(code || "utterance error"));
         };
-
         try {
           window.speechSynthesis.speak(utter);
         } catch (err3) {
-          reject(err3);
+          finishErr(err3);
         }
-      };
-
-      speakNext();
+      });
     });
   }
 
@@ -747,7 +807,7 @@ function boot() {
     pendingAutoId = -1;
     if (!plain) return;
     if (!fromUserGesture) {
-      setSpeechStatus("Tap Hear Elon read it to hear the slip aloud.");
+      setSpeechStatus("Tap Hear Cosmo read it to hear the slip aloud.");
       return;
     }
 
@@ -765,13 +825,13 @@ function boot() {
       return;
     }
 
-    setSpeechStatus("Elon is reading the slip...");
+    setSpeechStatus("Cosmo is reading the slip...");
     hearBtn.disabled = true;
 
     var doneOk = function () {
       if (token !== speakToken) return;
       hearBtn.disabled = false;
-      setSpeechStatus("Elon finished reading the slip.");
+      setSpeechStatus("Cosmo finished reading the slip.");
     };
     var doneFail = function (message) {
       if (token !== speakToken) return;
@@ -786,15 +846,15 @@ function boot() {
       speakWithNative(plain, token).then(function () {
         doneOk();
       }).catch(function () {
-        doneFail("Voice cut out. Tap Hear Elon read it again.");
+        doneFail("Voice cut out. Tap Hear Cosmo read it again.");
       });
       return;
     }
 
-    setSpeechStatus("Elon is reading the slip...");
+    setSpeechStatus("Cosmo is reading the slip...");
     speakWithSam(plain, token).then(function (ok) {
       if (ok) doneOk();
-      else doneFail("Voice stopped early. Tap Hear Elon read it again.");
+      else doneFail("Voice stopped early. Tap Hear Cosmo read it again.");
     }).catch(function () {
       doneFail("Phone blocked audio. Unmute media volume, then tap again.");
     });
@@ -803,7 +863,7 @@ function boot() {
   function autoSpeak(id) {
     if (id !== pendingAutoId || id !== readingId) return;
     pendingAutoId = -1;
-    setSpeechStatus("Tap Hear Elon read it to hear the slip aloud.");
+    setSpeechStatus("Tap Hear Cosmo read it to hear the slip aloud.");
   }
 
   function reveal(reading, id) {
@@ -820,7 +880,7 @@ function boot() {
     if (!reduceMotion) {
       slip.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-    setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
+    setSpeechStatus("Tap “Hear Cosmo read it” to hear the slip aloud.");
   }
 
   function fallbackCopy(text) {

@@ -1,4 +1,4 @@
-# Elon's Cosmic Oracle
+# Cosmo Voss Cosmic Oracle
 
 A static carnival fortune booth with a Mars-neon paint job. You enter a name, a birthday, and a star sign. A crystal ball spins, a paper slip unfurls, and the same words are read aloud with the Web Speech API.
 
@@ -18,7 +18,7 @@ Open `http://localhost:8080`. `fortunes.json` is loaded with `fetch`, so opening
 
 1. Name, birthday, and star sign. The sign fills in from the birthday and stays editable.
 2. Submit spins the crystal ball, then a paper slip unfurls with Career, Heart, and Cosmos, a short quip, and a star-chart blurb.
-3. The slip is spoken once when it finishes opening. **Hear Elon read it** speaks that same text again. The picker prefers a deeper male English voice when the browser has one, and lowers the pitch.
+3. The slip is spoken once when it finishes opening. **Hear Cosmo read it** speaks that same text again. The picker prefers a deeper male English voice when the browser has one, and lowers the pitch.
 4. **Copy reading** puts that same text on the clipboard.
 5. The page reflows for a narrow screen.
 
