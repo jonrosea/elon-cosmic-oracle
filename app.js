@@ -781,7 +781,7 @@ function boot() {
     pendingAutoId = -1;
     speakToken += 1;
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-    primeSpeech();
+    unlockAudio();
     window.clearTimeout(revealTimer);
     scene.classList.add("is-consulting");
     consultStatus.hidden = false;
