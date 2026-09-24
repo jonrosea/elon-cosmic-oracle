@@ -366,10 +366,10 @@ function voicePitch(voice) {
 
 function speechChunks(plain) {
   var chunks = [];
-  plain.split(/\n+/).forEach(function (line) {
+  String(plain || "").split(/\n+/).forEach(function (line) {
     var trimmed = line.trim();
     if (!trimmed) return;
-    var parts = trimmed.split(/(?<=[.!?])\s+/);
+    var parts = trimmed.replace(/([.!?])\s+/g, "$1\n").split("\n");
     parts.forEach(function (part) {
       var bit = part.trim();
       if (bit) chunks.push(bit);
@@ -415,14 +415,37 @@ function boot() {
   }
 
   var samReader = null;
-  var samQueueToken = 0;
+  var ttsAudio = null;
+  var audioCtx = null;
 
   function getSam() {
     if (samReader) return samReader;
     if (typeof SamJs !== "function") return null;
-    // Slightly deeper / slower carnival booth voice.
-    samReader = new SamJs({ pitch: 58, speed: 68, mouth: 128, throat: 128 });
+    samReader = new SamJs({ pitch: 58, speed: 72, mouth: 128, throat: 128 });
     return samReader;
+  }
+
+  function unlockAudio() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      }
+    } catch (err) {}
+    try {
+      if (!ttsAudio) {
+        ttsAudio = new Audio();
+        ttsAudio.setAttribute("playsinline", "true");
+        ttsAudio.setAttribute("webkit-playsinline", "true");
+        ttsAudio.preload = "auto";
+      }
+      // Tiny silent WAV unlock for iOS gesture chain.
+      ttsAudio.src =
+        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+      var p = ttsAudio.play();
+      if (p && typeof p.catch === "function") p.catch(function () {});
+    } catch (err2) {}
   }
 
   function sanitizeForSam(text) {
@@ -430,34 +453,52 @@ function boot() {
       .replace(/[“”]/g, '"')
       .replace(/[‘’]/g, "'")
       .replace(/[—–]/g, "-")
-      .replace(/[^\x20-\x7E\n]/g, " ")
+      .replace(/[^A-Za-z0-9 .,!?'\-]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   }
 
+  function spokenPlain(plain) {
+    // Keep spoken slip short so SAM stays reliable on phones.
+    var lines = String(plain || "").split(/\n+/).map(function (l) {
+      return l.trim();
+    }).filter(Boolean);
+    var keep = [];
+    lines.forEach(function (line) {
+      if (/^Career:/i.test(line) || /^Heart:/i.test(line) || /^Cosmos:/i.test(line)) {
+        keep.push(line);
+      }
+    });
+    if (!keep.length) keep = lines.slice(0, 3);
+    var text = keep.join(". ");
+    if (text.length > 280) text = text.slice(0, 277) + "...";
+    return sanitizeForSam(text);
+  }
+
   function samChunks(plain) {
-    var cleaned = sanitizeForSam(plain);
+    var cleaned = spokenPlain(plain);
+    if (!cleaned) return [];
     var parts = speechChunks(cleaned);
     var out = [];
     var buf = "";
     parts.forEach(function (part) {
       var next = buf ? buf + " " + part : part;
-      if (next.length <= 90) {
+      if (next.length <= 80) {
         buf = next;
         return;
       }
       if (buf) out.push(buf);
-      if (part.length <= 90) {
+      if (part.length <= 80) {
         buf = part;
       } else {
         var words = part.split(/\s+/);
         buf = "";
         words.forEach(function (word) {
           var trial = buf ? buf + " " + word : word;
-          if (trial.length <= 90) buf = trial;
+          if (trial.length <= 80) buf = trial;
           else {
             if (buf) out.push(buf);
-            buf = word.slice(0, 90);
+            buf = word.slice(0, 80);
           }
         });
       }
@@ -466,30 +507,112 @@ function boot() {
     return out;
   }
 
+  function u32(n) {
+    return new Uint8Array([n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255]);
+  }
+
+  function u16(n) {
+    return new Uint8Array([n & 255, (n >> 8) & 255]);
+  }
+
+  function wavFromBuf8(samples) {
+    var data = samples instanceof Uint8Array ? samples : new Uint8Array(samples);
+    var header = new Uint8Array(44);
+    var view = new DataView(header.buffer);
+    var writeStr = function (offset, str) {
+      for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + data.length, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, 22050, true);
+    view.setUint32(28, 22050, true);
+    view.setUint16(32, 1, true);
+    view.setUint16(34, 8, true);
+    writeStr(36, "data");
+    view.setUint32(40, data.length, true);
+    var out = new Uint8Array(44 + data.length);
+    out.set(header, 0);
+    out.set(data, 44);
+    return new Blob([out], { type: "audio/wav" });
+  }
+
+  function stopTtsAudio() {
+    if (!ttsAudio) return;
+    try {
+      ttsAudio.pause();
+      ttsAudio.removeAttribute("src");
+      ttsAudio.load();
+    } catch (err) {}
+  }
+
+  function playWavBlob(blob, token) {
+    return new Promise(function (resolve, reject) {
+      if (token !== speakToken) {
+        resolve(false);
+        return;
+      }
+      if (!ttsAudio) {
+        ttsAudio = new Audio();
+        ttsAudio.setAttribute("playsinline", "true");
+        ttsAudio.setAttribute("webkit-playsinline", "true");
+      }
+      var url = URL.createObjectURL(blob);
+      var cleaned = false;
+      var finish = function (ok, err) {
+        if (cleaned) return;
+        cleaned = true;
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        ttsAudio.onended = null;
+        ttsAudio.onerror = null;
+        if (ok) resolve(true);
+        else reject(err || new Error("audio play failed"));
+      };
+      ttsAudio.onended = function () { finish(true); };
+      ttsAudio.onerror = function () { finish(false, new Error("audio element error")); };
+      ttsAudio.src = url;
+      var playPromise = ttsAudio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise.then(function () {}).catch(function (err) {
+          finish(false, err);
+        });
+      }
+    });
+  }
+
   function startSpeech(plain, fromUserGesture) {
     pendingAutoId = -1;
     if (!plain) return;
     if (!fromUserGesture) {
-      setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
+      setSpeechStatus("Tap Hear Elon read it to hear the slip aloud.");
       return;
     }
 
     var token = ++speakToken;
-    samQueueToken = token;
+    stopTtsAudio();
     if ("speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch (err) {}
     }
 
+    unlockAudio();
+
     var sam = getSam();
     if (!sam) {
-      setSpeechStatus("Voice engine failed to load. Hard-refresh the page and try again.");
+      setSpeechStatus("Voice engine failed to load. Hard-refresh, then tap again.");
       return;
     }
 
     var chunks = samChunks(plain);
-    if (!chunks.length) return;
+    if (!chunks.length) {
+      setSpeechStatus("Nothing to read on this slip.");
+      return;
+    }
 
-    setSpeechStatus("Elon is reading the slip…");
+    setSpeechStatus("Elon is reading the slip...");
     hearBtn.disabled = true;
 
     var playIndex = function (index) {
@@ -503,30 +626,35 @@ function boot() {
         return;
       }
       var piece = chunks[index];
-      var result;
+      var buf8;
       try {
-        result = sam.speak(piece);
+        buf8 = sam.buf8(piece);
       } catch (err2) {
         hearBtn.disabled = false;
-        setSpeechStatus("Voice hit a snag. Tap “Hear Elon read it” again.");
+        setSpeechStatus("Voice hit a snag on that line. Tap Hear Elon read it again.");
         return;
       }
-      Promise.resolve(result).then(function () {
+      if (!buf8 || !buf8.length) {
+        // Skip unspeakable chunk and continue.
+        playIndex(index + 1);
+        return;
+      }
+      var blob = wavFromBuf8(buf8);
+      playWavBlob(blob, token).then(function () {
         playIndex(index + 1);
       }).catch(function () {
         hearBtn.disabled = false;
-        setSpeechStatus("Could not play audio. Check silent mode / volume, then tap again.");
+        setSpeechStatus("Phone blocked audio. Unmute the ringer, raise volume, then tap again.");
       });
     };
 
-    // Must start inside the tap gesture so AudioContext unlocks on iPhone.
     playIndex(0);
   }
 
   function autoSpeak(id) {
     if (id !== pendingAutoId || id !== readingId) return;
     pendingAutoId = -1;
-    setSpeechStatus("Tap “Hear Elon read it” to hear the slip aloud.");
+    setSpeechStatus("Tap Hear Elon read it to hear the slip aloud.");
   }
 
   function reveal(reading, id) {
@@ -537,7 +665,7 @@ function boot() {
     consultStatus.hidden = true;
     scene.classList.remove("is-consulting");
     actions.hidden = false;
-    hearBtn.disabled = !("speechSynthesis" in window);
+    hearBtn.disabled = typeof SamJs !== "function";
     slipWrap.classList.add("is-open");
     pendingAutoId = id;
     if (!reduceMotion) {
