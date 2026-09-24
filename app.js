@@ -414,64 +414,56 @@ function boot() {
     speechStatus.textContent = message;
   }
 
-  var ttsAudio = null;
-  var ttsObjectUrls = [];
+  var samReader = null;
+  var samQueueToken = 0;
 
-  function isMobileLike() {
-    var ua = navigator.userAgent || "";
-    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
-    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
-    return window.matchMedia("(pointer: coarse)").matches;
+  function getSam() {
+    if (samReader) return samReader;
+    if (typeof SamJs !== "function") return null;
+    // Slightly deeper / slower carnival booth voice.
+    samReader = new SamJs({ pitch: 58, speed: 68, mouth: 128, throat: 128 });
+    return samReader;
   }
 
-  function stopAudioTts() {
-    if (ttsAudio) {
-      try {
-        ttsAudio.onended = null;
-        ttsAudio.onerror = null;
-        ttsAudio.pause();
-        ttsAudio.removeAttribute("src");
-        ttsAudio.load();
-      } catch (err) {}
-    }
-    while (ttsObjectUrls.length) {
-      try { URL.revokeObjectURL(ttsObjectUrls.pop()); } catch (err2) {}
-    }
+  function sanitizeForSam(text) {
+    return String(text || "")
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/[—–]/g, "-")
+      .replace(/[^\x20-\x7E\n]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  function audioChunks(plain) {
-    var parts = speechChunks(plain);
+  function samChunks(plain) {
+    var cleaned = sanitizeForSam(plain);
+    var parts = speechChunks(cleaned);
     var out = [];
     var buf = "";
     parts.forEach(function (part) {
       var next = buf ? buf + " " + part : part;
-      if (next.length <= 140) {
+      if (next.length <= 90) {
         buf = next;
         return;
       }
       if (buf) out.push(buf);
-      if (part.length <= 140) {
+      if (part.length <= 90) {
         buf = part;
       } else {
         var words = part.split(/\s+/);
         buf = "";
         words.forEach(function (word) {
           var trial = buf ? buf + " " + word : word;
-          if (trial.length <= 140) buf = trial;
+          if (trial.length <= 90) buf = trial;
           else {
             if (buf) out.push(buf);
-            buf = word.slice(0, 140);
+            buf = word.slice(0, 90);
           }
         });
       }
     });
     if (buf) out.push(buf);
     return out;
-  }
-
-  function streamElementsUrl(text) {
-    // Google Translate TTS works as a no-key mobile-friendly audio stream.
-    return "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=en&q=" + encodeURIComponent(text);
   }
 
   function startSpeech(plain, fromUserGesture) {
@@ -483,108 +475,52 @@ function boot() {
     }
 
     var token = ++speakToken;
-    stopAudioTts();
+    samQueueToken = token;
     if ("speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch (err) {}
     }
 
-    var chunks = audioChunks(plain);
+    var sam = getSam();
+    if (!sam) {
+      setSpeechStatus("Voice engine failed to load. Hard-refresh the page and try again.");
+      return;
+    }
+
+    var chunks = samChunks(plain);
     if (!chunks.length) return;
 
-    // Prefer HTMLAudio TTS on phones — speechSynthesis is unreliable there.
-    // Desktop tries speechSynthesis first, then falls back to audio.
-    var preferAudio = isMobileLike() || !("speechSynthesis" in window);
+    setSpeechStatus("Elon is reading the slip…");
+    hearBtn.disabled = true;
 
-    var playAudioQueue = function () {
-      if (!ttsAudio) ttsAudio = new Audio();
-      ttsAudio.setAttribute("playsinline", "true");
-      ttsAudio.setAttribute("preload", "auto");
-      var index = 0;
-      setSpeechStatus("Elon is reading the slip…");
-
-      var playNext = function () {
-        if (token !== speakToken) return;
-        if (index >= chunks.length) {
-          setSpeechStatus("Elon finished reading the slip.");
-          return;
-        }
-        var url = streamElementsUrl(chunks[index]);
-        index += 1;
-        ttsAudio.onended = playNext;
-        ttsAudio.onerror = function () {
-          if (token !== speakToken) return;
-          setSpeechStatus("Voice stream failed. Check volume / silent mode, then tap again.");
-        };
-        ttsAudio.src = url;
-        var playPromise = ttsAudio.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch(function () {
-            if (token !== speakToken) return;
-            setSpeechStatus("Tap again after unlocking sound (iPhone silent switch / volume).");
-          });
-        }
-      };
-      playNext();
+    var playIndex = function (index) {
+      if (token !== speakToken) {
+        hearBtn.disabled = false;
+        return;
+      }
+      if (index >= chunks.length) {
+        hearBtn.disabled = false;
+        setSpeechStatus("Elon finished reading the slip.");
+        return;
+      }
+      var piece = chunks[index];
+      var result;
+      try {
+        result = sam.speak(piece);
+      } catch (err2) {
+        hearBtn.disabled = false;
+        setSpeechStatus("Voice hit a snag. Tap “Hear Elon read it” again.");
+        return;
+      }
+      Promise.resolve(result).then(function () {
+        playIndex(index + 1);
+      }).catch(function () {
+        hearBtn.disabled = false;
+        setSpeechStatus("Could not play audio. Check silent mode / volume, then tap again.");
+      });
     };
 
-    var playSynth = function () {
-      var voice = chooseVoice();
-      var pitch = voicePitch(voice);
-      var index = 0;
-      setSpeechStatus(voice
-        ? "Elon is reading the slip… (" + voice.name + ")"
-        : "Elon is reading the slip…");
-
-      var started = false;
-      var watchdog = window.setTimeout(function () {
-        if (token !== speakToken || started) return;
-        // Synth never started — fall back to audio TTS.
-        try { window.speechSynthesis.cancel(); } catch (err2) {}
-        playAudioQueue();
-      }, 900);
-
-      var speakNext = function () {
-        if (token !== speakToken) {
-          window.clearTimeout(watchdog);
-          return;
-        }
-        if (index >= chunks.length) {
-          window.clearTimeout(watchdog);
-          setSpeechStatus("Elon finished reading the slip.");
-          return;
-        }
-        var utterance = new SpeechSynthesisUtterance(chunks[index]);
-        index += 1;
-        if (voice) utterance.voice = voice;
-        utterance.lang = voice && voice.lang ? voice.lang : "en-US";
-        utterance.pitch = pitch;
-        utterance.rate = 0.95;
-        utterance.volume = 1;
-        utterance.onstart = function () {
-          started = true;
-          window.clearTimeout(watchdog);
-        };
-        utterance.onend = speakNext;
-        utterance.onerror = function (event) {
-          var reason = event && event.error ? event.error : "";
-          if (reason === "interrupted" || reason === "canceled" || reason === "cancelled") return;
-          window.clearTimeout(watchdog);
-          if (token !== speakToken) return;
-          playAudioQueue();
-        };
-        try {
-          window.speechSynthesis.speak(utterance);
-          window.speechSynthesis.resume();
-        } catch (err3) {
-          window.clearTimeout(watchdog);
-          playAudioQueue();
-        }
-      };
-      speakNext();
-    };
-
-    if (preferAudio) playAudioQueue();
-    else playSynth();
+    // Must start inside the tap gesture so AudioContext unlocks on iPhone.
+    playIndex(0);
   }
 
   function autoSpeak(id) {
@@ -716,7 +652,6 @@ function boot() {
     var id = ++readingId;
     pendingAutoId = -1;
     speakToken += 1;
-    stopAudioTts();
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     primeSpeech();
     window.clearTimeout(revealTimer);
