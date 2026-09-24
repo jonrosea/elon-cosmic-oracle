@@ -49,11 +49,24 @@ var STAR_BLURBS = {
 
 var MALE_RANK = [
   "google uk english male",
+  "google us english male",
   "microsoft david",
   "microsoft george",
   "microsoft mark",
   "microsoft guy",
+  "english united states",
+  "english (united states)",
+  "en-us-x-tpd",
+  "en-us-x-tpd-local",
+  "en-us-x-tpd-network",
+  "en-us-x-iol",
+  "en-gb-x-gbd",
+  "en-gb-x-gbd-local",
+  "en-gb-x-gbd-network",
+  "en-us-x-sfg",
+  "male",
   "daniel",
+  "david",
   "alex",
   "aaron",
   "arthur",
@@ -312,19 +325,22 @@ function slipHtml(model) {
 }
 
 function scoreVoice(voice) {
-  var name = voice.name.toLowerCase();
+  var name = (voice.name || "").toLowerCase();
   var lang = (voice.lang || "").toLowerCase();
+  var uri = String(voice.voiceURI || "").toLowerCase();
+  var blob = name + " " + uri;
   var score = 0;
-  if (lang.indexOf("en") === 0) score += 3;
-  else score -= 6;
-  if (name.indexOf("male") !== -1) score += 10;
-  if (name.indexOf("female") !== -1) score -= 10;
+  if (lang.indexOf("en") === 0) score += 8;
+  else score -= 12;
+  if (voice.localService) score += 4;
+  if (blob.indexOf("male") !== -1) score += 28;
+  if (blob.indexOf("female") !== -1) score -= 40;
   FEMALE_HINTS.forEach(function (hint) {
-    if (name.indexOf(hint) !== -1) score -= 6;
+    if (blob.indexOf(hint) !== -1) score -= 18;
   });
   for (var i = 0; i < MALE_RANK.length; i += 1) {
-    if (name.indexOf(MALE_RANK[i]) !== -1) {
-      score += 24 - i;
+    if (blob.indexOf(MALE_RANK[i]) !== -1) {
+      score += 40 - Math.min(i, 30);
       break;
     }
   }
@@ -355,13 +371,14 @@ function chooseVoice() {
 }
 
 function voicePitch(voice) {
-  if (!voice) return 0.8;
-  var name = voice.name.toLowerCase();
-  var femaleish = name.indexOf("female") !== -1;
+  // Keep Elon booth deep / guy even if the engine only offers a neutral voice.
+  if (!voice) return 0.72;
+  var blob = ((voice.name || "") + " " + (voice.voiceURI || "")).toLowerCase();
+  var femaleish = blob.indexOf("female") !== -1;
   FEMALE_HINTS.forEach(function (hint) {
-    if (name.indexOf(hint) !== -1) femaleish = true;
+    if (blob.indexOf(hint) !== -1) femaleish = true;
   });
-  return femaleish ? 0.7 : 0.84;
+  return femaleish ? 0.55 : 0.72;
 }
 
 function speechChunks(plain) {
@@ -467,20 +484,23 @@ function boot() {
   }
 
   function spokenPlain(plain) {
-    // Keep spoken slip short so SAM stays reliable on phones.
+    // Career / Heart / Cosmos (+ short quip). Star chart stays off the spoken pass.
     var lines = String(plain || "").split(/\n+/).map(function (l) {
       return l.trim();
     }).filter(Boolean);
     var keep = [];
+    var quip = "";
     lines.forEach(function (line) {
       if (/^Career:/i.test(line) || /^Heart:/i.test(line) || /^Cosmos:/i.test(line)) {
         keep.push(line);
+      } else if (!quip && !/^Star chart/i.test(line) && !/^For /i.test(line) && !/^Seal /i.test(line) && line.length < 120) {
+        // humor line usually sits after cosmos
+        if (keep.length >= 3) quip = line;
       }
     });
-    if (!keep.length) keep = lines.slice(0, 3);
-    var text = keep.join(". ");
-    if (text.length > 280) text = text.slice(0, 277) + "...";
-    return sanitizeForSam(text);
+    if (quip) keep.push(quip);
+    if (!keep.length) keep = lines.slice(0, 4);
+    return sanitizeForSam(keep.join(". "));
   }
 
   function samChunks(plain) {
@@ -606,64 +626,77 @@ function boot() {
         reject(new Error("no speechSynthesis"));
         return;
       }
-      var text = spokenPlain(plain);
-      if (!text) {
+
+      // Android Chrome truncates long single utterances. Speak short chunks in order.
+      var chunks = speechChunks(spokenPlain(plain)).filter(function (part) {
+        return part && part.length;
+      });
+      if (!chunks.length) {
         reject(new Error("empty"));
         return;
       }
+
       try { window.speechSynthesis.cancel(); } catch (err) {}
+      try { window.speechSynthesis.getVoices(); } catch (err2) {}
 
-      var utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.02;
-      utter.pitch = voicePitch(chooseVoice());
-      utter.volume = 1;
       var voice = chooseVoice();
-      if (voice) utter.voice = voice;
-      if (voice && voice.lang) utter.lang = voice.lang;
-      else utter.lang = "en-US";
+      var pitch = voicePitch(voice);
+      var started = false;
+      var index = 0;
 
-      var settled = false;
-      var watchdog = 0;
-      var finish = function (ok, err) {
-        if (settled) return;
-        settled = true;
-        if (watchdog) window.clearInterval(watchdog);
-        if (ok) resolve(true);
-        else reject(err || new Error("native speak failed"));
-      };
-
-      utter.onend = function () { finish(true); };
-      utter.onerror = function (event) {
-        finish(false, new Error((event && event.error) || "utterance error"));
-      };
-
-      // Android Chrome sometimes stalls mid-utterance; nudge it.
-      watchdog = window.setInterval(function () {
+      var speakNext = function () {
         if (token !== speakToken) {
-          try { window.speechSynthesis.cancel(); } catch (e) {}
-          finish(false, new Error("cancelled"));
+          try { window.speechSynthesis.cancel(); } catch (e0) {}
+          reject(new Error("cancelled"));
           return;
         }
-        try {
-          if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-          }
-        } catch (e2) {}
-      }, 8000);
+        if (index >= chunks.length) {
+          resolve(true);
+          return;
+        }
 
-      try {
-        window.speechSynthesis.speak(utter);
-        // Some Android builds need a tick before speaking registers.
-        window.setTimeout(function () {
-          if (token !== speakToken) return;
-          if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-            finish(false, new Error("native did not start"));
+        var piece = chunks[index++];
+        // Keep each Android chunk short.
+        if (piece.length > 140) piece = piece.slice(0, 137) + "...";
+
+        var utter = new SpeechSynthesisUtterance(piece);
+        utter.rate = 0.96;
+        utter.pitch = pitch;
+        utter.volume = 1;
+        if (voice) utter.voice = voice;
+        utter.lang = (voice && voice.lang) || "en-US";
+
+        utter.onstart = function () { started = true; };
+        utter.onend = function () {
+          // Small gap helps Android flush the audio focus between chunks.
+          window.setTimeout(speakNext, 60);
+        };
+        utter.onerror = function (event) {
+          var code = event && event.error;
+          if (code === "interrupted" || code === "canceled") {
+            reject(new Error(code));
+            return;
           }
-        }, 350);
-      } catch (err3) {
-        finish(false, err3);
-      }
+          // If at least one chunk played, finish gracefully instead of falling over.
+          if (started && index >= chunks.length) {
+            resolve(true);
+            return;
+          }
+          if (started) {
+            window.setTimeout(speakNext, 60);
+            return;
+          }
+          reject(new Error(code || "utterance error"));
+        };
+
+        try {
+          window.speechSynthesis.speak(utter);
+        } catch (err3) {
+          reject(err3);
+        }
+      };
+
+      speakNext();
     });
   }
 
